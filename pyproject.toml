@@ -1,0 +1,31 @@
+[project]
+name = "lines"
+version = "0.1.0"
+description = "Visualise pytorch profiler output"
+authors = [
+    "Liam Atkinson<liamatkinson@gmail.com>"
+]
+readme = "README.md"
+python = "^3.9"
+
+[dev-dependencies]
+black = { version = "^21.12b0", python = "^3.10" }
+isort = { version = "^5.10.1", python = "^3.10" }
+flake8 = { version = "^4.0.1", python = "^3.10" }
+
+[tool.pyright]
+include = ["lines"]
+exclude = ["**/node_modules",
+    "**/__pycache__",
+]
+
+
+[tool.black]
+max-line-length = 100
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = "E203"
