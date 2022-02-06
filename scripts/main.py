@@ -2,20 +2,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Union
 
-import rich
 from rich.console import Console
 from rich.pretty import pprint
-from rich.syntax import Syntax
 from rich.table import Table
 
-from lines.code import ScopeFinder
 from lines.log import get_logger
 from lines.process_traces import File, load_traces
 
 
-def fmt_time(time_us: int) -> str:
+def fmt_time(time_us: Union[int, float]) -> str:
     if time_us / 1000_000 > 1:
         # Show in s
         return f"{time_us / 1000_000:.2f}s"
@@ -27,39 +24,43 @@ def fmt_time(time_us: int) -> str:
 
 
 class Viewer:
-    def __init__(self, files_dict, console):
+    def __init__(self, files_dict: Dict[Path, File], console):
         self.files_dict = files_dict
         self.console = console
 
-    @classmethod
-    def build(cls, files_dict, console: Console) -> Viewer:
-        processed_file_dict = {}
-        for file_name, lines_dict in self.files_dict.items():
-
-            file = File.from_dict(file_name, lines_dict)
-            processed_file_dict[file_name] = file
-
-        return cls(processed_file_dict, console)
-
     def view_file(self, file_name: str):
-        file = self.files_dict[file_name]
+        file = self.files_dict[Path(file_name)]
 
-        lines_dict = file.lines
-        finder = file.finder
+        # lines_dict = file.line
+        # finder = file.finder
 
-        scope_dict = defaultdict(list)
-        lines_to_scope = {}
+        # scope_dict = defaultdict(list)
+        # lines_to_scope = {}
 
-        for line_no, line_stats in lines_dict.items():
-            scope_dict[finder[line_no]].append(line_stats)
-            lines_to_scope[line_no] = finder[line_no]
+        # for line_no, line_stats in lines_dict.items():
+        # scope_dict[finder[line_no]].append(line_stats)
+        # lines_to_scope[line_no] = finder[line_no]
 
         # scope_stats_dict = {
         # scope: ScopeStats.from_lines(lines) for scope, lines in scope_dict.items()
         # }
 
-        with file_name.open("r") as f:
-            file_lines = f.readlines()
+        with Path(file_name).open("r") as f:
+            file_lines = [line.rstrip() for line in f.readlines()]
+
+        for scope in file.scope.items():
+            if scope.data.stats.calls == 0:
+                for i in range(scope.begin, scope.end):
+                    file_lines[i] = f"[grey]{file_lines[i]}[/grey]"
+                continue
+            file_lines[scope.begin - 1] = f"[red]{file_lines[scope.begin]}[/red]"
+            print(file_lines[scope.begin])
+
+        # for file_line in file_lines:
+        # self.console.print(file_line)
+        return
+
+        breakpoint()
 
         table = Table(title=str(file_name))
 
@@ -98,7 +99,21 @@ class Viewer:
         self.console.print(table)
 
     def list_files(self) -> None:
-        pprint([str(k) for k in sorted(self.files_dict.keys())])
+        name_time_pairs = [
+            (str(k), v.stats.host_total, v.stats.device_total)
+            for k, v in self.files_dict.items()
+        ]
+        name_time_pairs = list(sorted(name_time_pairs, key=lambda x: x[1]))
+
+        table = Table(title="File Summary")
+        table.add_column("Path", no_wrap=False)
+        table.add_column("CPU time")
+        table.add_column("GPU time")
+
+        for file, gpu, cpu in name_time_pairs:
+            table.add_row(file, fmt_time(gpu), fmt_time(cpu))
+
+        self.console.print(table, style="bold bright_green on black")
 
 
 if __name__ == "__main__":
@@ -111,12 +126,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    file_dict = load_traces(args.profile_json)
-
-    breakpoint()
+    files_dict = load_traces(args.profile_json)
 
     console = Console()
-    viewer = Viewer.build(scope_stats, console)
+    viewer = Viewer(files_dict, console)
 
     viewer.list_files()
 
