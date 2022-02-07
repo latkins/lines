@@ -134,7 +134,32 @@ def process_call_stack(call_stack: str) -> List[Tuple[Path, int, str]]:
     return processed_calls
 
 
-def load_traces(profile_json: Path) -> Dict[Path, File]:
+def replace_paths(
+    file_dict: Dict[Path, Any],
+    src: Path,
+    filter_src: Path,
+) -> Dict[Path, Any]:
+    """Look for files"""
+
+    # Look for files in file_dict relative to filter_src, replace them with files from src
+    for k in list(file_dict.keys()):
+        try:
+            rel = k.relative_to(str(filter_src))
+        except ValueError:
+            logger.info(f"Couldn't find file relative to {filter_src} for {k}")
+        else:
+            renamed = src / rel
+            if renamed.exists():
+                file_dict[renamed] = file_dict[k]
+                logger.info(f"Renamed {k} to {renamed}")
+        del file_dict[k]
+
+    return file_dict
+
+
+def load_traces(
+    profile_json: Path, src: Optional[Path] = None, filter_src: Optional[Path] = None
+) -> Dict[Path, File]:
     """
     Ultimately return for each profile?
     """
@@ -171,6 +196,9 @@ def load_traces(profile_json: Path) -> Dict[Path, File]:
             processed_stack = process_call_stack(call["call_stack"])
             for (file, line_no, method) in processed_stack:
                 files_dict[file][line_no].append(call)
+
+    if src and filter_src:
+        files_dict = replace_paths(files_dict, src, filter_src)
 
     return {
         file_path: File.from_dict(file_path, lines_dict)

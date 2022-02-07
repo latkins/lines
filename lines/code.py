@@ -20,7 +20,6 @@ class ScopeFinder:
                     for d in sorted(matches, key=lambda i: i.length(), reverse=True)
                 ]
             )
-            # return min(matches, key=lambda i: i.length()).data.name
 
     def __getitem__(self, lineno: int) -> Optional[str]:
         return self.query(lineno)
@@ -33,7 +32,7 @@ def compute_size(node):
         if hasattr(node, "lineno"):
             min_lineno = min(min_lineno, node.lineno)
             max_lineno = max(max_lineno, node.lineno)
-    return (min_lineno, max_lineno + 1)
+    return (min_lineno, max_lineno)
 
 
 def file_to_tree(filename: Path):
