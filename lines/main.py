@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.pretty import pprint
+from rich.style import Style
 from rich.table import Table
+from rich.text import Text
+from textual import events, log
 from textual.app import App
+from textual.reactive import Reactive
 from textual.widget import Widget
 from textual.widgets import Footer, ScrollView
 
@@ -40,8 +43,17 @@ class FileList(Widget):
 
 
 class Viewer:
-    def __init__(self, files_dict: Dict[Path, File]):
+    def __init__(self, files_dict: Dict[Path, File], focus_row: Optional[int] = None):
         self.files_dict = files_dict
+
+        if focus_row is None:
+            self.focus_row = len(files_dict)
+        else:
+            self.focus_row = focus_row
+
+    def move_focus(self, increment):
+        new_value = (self.focus_row + increment) % len(self.files_dict)
+        self.focus_row = new_value
 
     def view_file(self, file_name: str) -> List[str]:
         file = self.files_dict[Path(file_name)]
@@ -95,7 +107,7 @@ class Viewer:
 
     def list_files(self) -> Table:
         name_time_pairs = [
-            (str(k), v.stats.host_total, v.stats.device_total)
+            (str(k.name), v.stats.host_total, v.stats.device_total)
             for k, v in self.files_dict.items()
         ]
         name_time_pairs = list(sorted(name_time_pairs, key=lambda x: x[1]))
@@ -105,10 +117,24 @@ class Viewer:
         table.add_column("CPU time")
         table.add_column("GPU time")
 
-        for file, gpu, cpu in name_time_pairs:
-            table.add_row(file, fmt_time(gpu), fmt_time(cpu))
+        for i, (file, gpu, cpu) in enumerate(name_time_pairs):
+            style = ""
+            if i == self.focus_row - 1:
+                style = Style(bgcolor="red", bold=True, frame=True)
+            table.add_row(
+                file,
+                fmt_time(gpu),
+                fmt_time(cpu),
+                style=style,
+            )
 
         return table
+
+
+class SideBar(ScrollView):
+    async def on_click(self, event: events.Click) -> None:
+        event.prevent_default().stop()
+        self.log(f"Clicked: {event}")
 
 
 class LinesApp(App):
@@ -123,35 +149,52 @@ class LinesApp(App):
         await self.bind("q", "quit", "Quit")
         await self.bind("b", "view.toggle('sidebar')", "Toggle sidebar")
 
+        await self.bind("left", "focus('left')")
+        await self.bind("right", "focus('right')")
+
+        await self.bind("up", "move('up')")
+        await self.bind("down", "move('down')")
+
+    async def action_move(self, direction: str) -> None:
+        if self.focused == self.side:
+            increment = -1 if direction == "up" else 1
+            self.log(self.viewer.focus_row)
+            self.viewer.move_focus(increment)
+            self.log(self.viewer.focus_row)
+            await self.add_content()
+
+    async def action_focus(self, direction: str) -> None:
+        if direction == "left":
+            await self.app.set_focus(self.side)
+        elif direction == "right":
+            await self.app.set_focus(self.body)
+
+    async def add_content(self):
+        files_table = self.viewer.list_files()
+
+        name_time_pairs = [
+            (str(k), v.stats.host_total, v.stats.device_total)
+            for k, v in self.viewer.files_dict.items()
+        ]
+
+        name_time_pairs = list(sorted(name_time_pairs, key=lambda x: x[1]))
+        self.log(self.viewer.focus_row)
+        file = name_time_pairs[self.viewer.focus_row - 1][0]
+
+        code_content = self.viewer.view_file(file)
+
+        await self.side.update(files_table)
+        await self.body.update("\n".join(code_content))
+
     async def on_mount(self) -> None:
-        self.side = side = ScrollView(auto_width=True)
+        self.side = side = SideBar(auto_width=True)
         self.body = body = ScrollView(auto_width=True)
 
         await self.view.dock(Footer(), edge="bottom")
         await self.view.dock(side, edge="left", size=48, name="sidebar")
         await self.view.dock(body, edge="right", name="code")
 
-        async def add_content():
-            files_table = self.viewer.list_files()
-
-            name_time_pairs = [
-                (str(k), v.stats.host_total, v.stats.device_total)
-                for k, v in self.viewer.files_dict.items()
-            ]
-
-            name_time_pairs = list(sorted(name_time_pairs, key=lambda x: x[1]))
-            file = name_time_pairs[-1][0]
-
-            code_content = self.viewer.view_file(file)
-
-            await side.update(files_table)
-            await body.update("\n".join(code_content))
-
-        await self.call_later(add_content)
-
-    async def action_item_clicked(self, item: str) -> None:
-        self.console.bell()
-        self.log("checkbox item", item, "clicked")
+        await self.call_later(self.add_content)
 
 
 if __name__ == "__main__":
@@ -171,10 +214,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    import pickle
+
+    cache = Path("dump.pkl")
+
     files_dict = load_traces(args.profile_json, args.src, args.filter_src)
+    # pickle.dump(files_dict, cache.open("wb"))
+
+    # files_dict = pickle.load(cache.open("rb"))
+
+    logger.info("Loaded traces")
 
     viewer = Viewer(files_dict)
-    LinesApp.run(title="Lines", viewer=viewer)
+    LinesApp.run(title="Lines", viewer=viewer, log="textual.log")
 
     """
     console = Console()

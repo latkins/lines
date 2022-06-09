@@ -126,12 +126,25 @@ def process_call(call: str) -> Tuple[Path, int, str]:
 
 
 def process_call_stack(call_stack: str) -> List[Tuple[Path, int, str]]:
-    call_stack = filter(len, call_stack.split(";"))
+    call_stack_list = list(filter(len, call_stack.split(";")))
 
     processed_calls = []
-    for call in call_stack:
-        processed_calls.append(process_call(call))
+    for call in call_stack_list:
+        try:
+            processed_calls.append(process_call(call))
+        except ValueError:
+            logger.debug(f"could not process {call}, skipping")
     return processed_calls
+
+
+def make_absolute(file_dict: Dict[Path, Any], src: Path) -> Dict[Path, Any]:
+    """Keys in `files_dict` may be relative. Make these absolute, if those files exist."""
+    for k in list(file_dict.keys()):
+        absolute = src / k
+        if absolute.exists():
+            file_dict[absolute] = file_dict[k]
+            del file_dict[k]
+    return file_dict
 
 
 def replace_paths(
@@ -149,9 +162,13 @@ def replace_paths(
             logger.info(f"Couldn't find file relative to {filter_src} for {k}")
         else:
             renamed = src / rel
+            if renamed == k:
+                continue
+
             if renamed.exists():
                 file_dict[renamed] = file_dict[k]
                 logger.info(f"Renamed {k} to {renamed}")
+
         del file_dict[k]
 
     return file_dict
@@ -174,10 +191,6 @@ def load_traces(
     name_root = str(profile_json.name).split(".")[0]
     valid_keys = [k for k in keys if k[0].startswith(name_root)]
 
-    # profile_json.name lhs should overlap w/ worker.
-    # Which span we are should be based on timestamp.
-    valid_keys = list(sorted(valid_keys, key=lambda x: int(x[1])))
-
     if len(run.profiles) > 1:
         logger.warn(f"Found {len(run.profiles)} profiles, choosing {valid_keys[-1]}.")
 
@@ -196,6 +209,9 @@ def load_traces(
             processed_stack = process_call_stack(call["call_stack"])
             for (file, line_no, method) in processed_stack:
                 files_dict[file][line_no].append(call)
+
+    if src:
+        files_dict = make_absolute(files_dict, src)
 
     if src and filter_src:
         files_dict = replace_paths(files_dict, src, filter_src)

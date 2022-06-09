@@ -56,5 +56,3 @@ if __name__ == "__main__":
     with file.open("r") as f:
         for i, line in enumerate(f):
             print(f"{line.rstrip():20} | {finder[i]}")
-
-    breakpoint()
